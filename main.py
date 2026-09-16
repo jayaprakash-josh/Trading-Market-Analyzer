@@ -141,9 +141,11 @@ def _analyze_single_stock(symbol, global_cues, nifty_data):
         'news': sentiment_data.get('latest_news', [])
     }
 
+from concurrent.futures import ThreadPoolExecutor
+
 def main():
     print(f"\n{'='*60}\n   NSE PRE-MARKET ANALYZER v3 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("   Architecture: Deterministic Score -> LLM News Classifier")
+    print("   Architecture: Deterministic Score -> LLM News Classifier (Multithreaded)")
     print(f"{'='*60}\n")
     
     fii_dii = fetch_fii_dii_data()
@@ -151,10 +153,18 @@ def main():
     nifty_data = fetch_stock_returns("^NSEI")
     
     results = []
-    for symbol in WATCHLIST:
-        res = _analyze_single_stock(symbol, global_cues, nifty_data)
-        results.append(res)
-        
+    # Use ThreadPoolExecutor to run stocks in parallel
+    print(f"Starting parallel analysis of {len(WATCHLIST)} stocks...")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # submit all tasks
+        futures = [executor.submit(_analyze_single_stock, symbol, global_cues, nifty_data) for symbol in WATCHLIST]
+        # collect results as they complete
+        for future in futures:
+            try:
+                results.append(future.result())
+            except Exception as e:
+                logger.error(f"Error in thread execution: {e}")
+                
     report_path = generate_html_report(results, fii_dii, global_cues)
     
     # Save Phase 1 Results for Phase 2 (Live Confirmation Engine)

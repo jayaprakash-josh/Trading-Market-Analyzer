@@ -1,28 +1,36 @@
 import os
 import sys
 import time
+import json
 from datetime import datetime
 from config import (
     WATCHLIST, OR_MINUTES, CANDLE_INTERVAL, BREAKOUT_VOLUME_MULTIPLIER, 
-    TRADING_CAPITAL, RISK_PER_TRADE_PERCENT, MAX_POSITION_PCT
+    TRADING_CAPITAL, RISK_PER_TRADE_PERCENT, MAX_POSITION_PCT, PHASE2_CUTOFF_TIME
 )
 from core.live_data import fetch_intraday_candles, calculate_live_vwap
 from core.opening_range import detect_opening_range, check_breakout
 from core.position_sizer import calculate_trade_levels, calculate_position_size
 from core.live_report import generate_live_report
-from core.technicals import fetch_and_calculate_technicals
 
-def main():
-    print(f"\n{'='*60}\n   PHASE 2: LIVE MARKET CONFIRMATION ENGINE (INDEPENDENT) \n{'='*60}")
-    
+def load_phase1_data():
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phase1_results.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+                # create dict keyed by symbol
+                return {item['symbol']: item for item in data}
+        except Exception as e:
+            print(f"Error loading phase1_results.json: {e}")
+    return {}
+
+def scan_market(phase1_data):
     candidates = WATCHLIST
-    print(f"Scanning {len(candidates)} stocks from Watchlist for OR Breakouts...")
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Scanning {len(candidates)} stocks for OR Breakouts...")
     
     all_results = []
     
     for symbol in candidates:
-        print(f"\nScanning {symbol}...")
-        
         scan_data = {
             'symbol': symbol,
             'status': 'UNKNOWN',
@@ -39,7 +47,6 @@ def main():
         
         candles = fetch_intraday_candles(symbol, interval=CANDLE_INTERVAL)
         if candles is None or candles.empty:
-            print("  -> No intraday data available yet.")
             scan_data['status'] = 'NO_DATA'
             scan_data['data_accuracy'] = 'FAILED'
             scan_data['missing_metrics'].append('Intraday Candles')
@@ -50,7 +57,6 @@ def main():
             
         or_data = detect_opening_range(candles, or_minutes=OR_MINUTES)
         if not or_data:
-            print(f"  -> Opening range ({OR_MINUTES}m) not yet formed.")
             scan_data['status'] = 'OR_PENDING'
             scan_data['missing_metrics'].append('OR Data')
             all_results.append(scan_data)
@@ -73,18 +79,17 @@ def main():
         scan_data['status'] = result['status']
         
         if result['status'].startswith("CONFIRMED"):
-            print(f"  -> {result['status']} @ {result['breakout_price']}")
+            print(f"  -> {symbol}: {result['status']} @ {result['breakout_price']}")
             
             direction = result['direction']
             scan_data['direction'] = direction
             
-            # Fetch technicals just to get ATR for the stop loss buffer
-            tech = fetch_and_calculate_technicals(symbol)
-            atr = tech.get('ATR', 0) if tech else 0
+            # Instantly load pre-calculated ATR from Phase 1 instead of fetching daily data!
+            atr = phase1_data.get(symbol, {}).get('atr', 0)
             
             if atr == 0:
                 scan_data['data_accuracy'] = 'PARTIAL (Missing ATR)'
-                scan_data['missing_metrics'].append('ATR (Daily)')
+                scan_data['missing_metrics'].append('ATR (Phase1)')
                 scan_data['atr'] = 'Fallback (0.2%)'
             else:
                 scan_data['atr'] = round(atr, 2)
@@ -114,21 +119,35 @@ def main():
                 'levels': levels,
                 'sizing': sizing
             })
-        else:
-            print(f"  -> {result['status']}: {result.get('reason', '')}")
             
         all_results.append(scan_data)
             
-    # 3. Generate Report
+    # Generate Report
     confirmed_setups = [s for s in all_results if s['status'].startswith('CONFIRMED')]
     
     if confirmed_setups:
-        print(f"\nSUCCESS: Found {len(confirmed_setups)} CONFIRMED setups.")
-    else:
-        print(f"\nINFO: No confirmed setups found at this time.")
+        print(f"SUCCESS: Found {len(confirmed_setups)} CONFIRMED setups.")
+    
+    generate_live_report(all_results)
+    return len(confirmed_setups) > 0
+
+def main():
+    print(f"\n{'='*60}\n   PHASE 2: LIVE MARKET CONFIRMATION ENGINE (LOOP) \n{'='*60}")
+    
+    phase1_data = load_phase1_data()
+    print(f"Loaded Phase 1 data for {len(phase1_data)} stocks.")
+    
+    while True:
+        current_time = datetime.now().strftime("%H:%M")
         
-    report_path = generate_live_report(all_results)
-    print(f"Phase 2 Report saved to: {report_path}")
+        if current_time > PHASE2_CUTOFF_TIME:
+            print(f"\nCutoff time ({PHASE2_CUTOFF_TIME}) reached. Shutting down live scanner.")
+            break
+            
+        scan_market(phase1_data)
+        
+        print("Sleeping for 60 seconds...")
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()

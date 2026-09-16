@@ -113,10 +113,10 @@ TIMEZONE = "Asia/Kolkata"
 ENABLE_LLM = True
 
 # AI Config
-LLM_PROVIDER = "groq"
-LLM_MODEL = "openai/gpt-oss-120b"
-LLM_TEMPERATURE = 0.2
+LLM_PROVIDER = "google"
 LLM_MODEL_GEMINI = "gemini-3.5-flash-lite"
+LLM_MODEL = LLM_MODEL_GEMINI
+LLM_TEMPERATURE = 0.2
 
 # --- PHASE 2: LIVE CONFIRMATION SETTINGS ---
 OR_MINUTES = 15                   # Opening Range window: 5 or 15 minutes
