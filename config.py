@@ -2,13 +2,26 @@ import os
 
 # --- WATCHLIST CONFIGURATION ---
 # Change ACTIVE_SET to "SET_2" to run the new batch of stocks. Do not run both at the same time.
-ACTIVE_SET = "SET_2" 
+ACTIVE_SET = "TEST" 
 
 # Aliases for tickers that differ between internal symbols and official NSE/Yahoo listings
 SYMBOL_ALIASES = {
     "INDUSIND": "INDUSINDBK",
     "NATCOFORM": "NATCOPHARM"
 }
+
+WATCHLIST_TEST = [
+    "MCX",
+    "M&M",
+    "SONACOMS",
+    "AZAD",
+    "WABAG",
+    "AVALON",
+    "INDOMIM",
+    "GAJA",
+    "LALITHAA",
+    "BOSCHLTD",
+]
 
 WATCHLIST_SET_1 = [
     "M&M",
@@ -41,7 +54,12 @@ WATCHLIST_SET_2 = [
     "WABAG"
 ]
 
-WATCHLIST = WATCHLIST_SET_1 if ACTIVE_SET == "SET_1" else WATCHLIST_SET_2
+if ACTIVE_SET == "TEST":
+    WATCHLIST = WATCHLIST_TEST
+elif ACTIVE_SET == "SET_1":
+    WATCHLIST = WATCHLIST_SET_1
+else:
+    WATCHLIST = WATCHLIST_SET_2
 
 SECTORS = {
     "WAAREEENER": "Renewable energy / Solar / Manufacturing",
@@ -61,6 +79,8 @@ SECTORS = {
     "HINDCOPPER": "Mining / Metals / Copper",
     "IGIL": "Industrial / Gas / Infrastructure",
     "INDOMIM": "Precision Engineering / Manufacturing",
+    "GAJA": "Asset Management / Financial Services",
+    "LALITHAA": "Retail / Jewellery",
     "INDUSIND": "Private Banking / Financial services",
     "KAYNES": "Electronics / EMS / Technology",
     "KFINTECH": "Financial Technology / Registrar",
@@ -113,9 +133,9 @@ TIMEZONE = "Asia/Kolkata"
 ENABLE_LLM = True
 
 # AI Config
-LLM_PROVIDER = "google"
+LLM_PROVIDER = "groq"
 LLM_MODEL_GEMINI = "gemini-3.5-flash-lite"
-LLM_MODEL = LLM_MODEL_GEMINI
+LLM_MODEL = "openai/gpt-oss-120b"
 LLM_TEMPERATURE = 0.2
 
 # --- PHASE 2: LIVE CONFIRMATION SETTINGS ---

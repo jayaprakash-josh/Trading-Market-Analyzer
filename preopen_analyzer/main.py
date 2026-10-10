@@ -12,7 +12,7 @@ from preopen_analyzer.normalizer import normalize_snapshot
 from preopen_analyzer.filters import apply_hard_filters
 from preopen_analyzer.scoring import calculate_scores
 from preopen_analyzer.report import generate_report
-from preopen_analyzer.fno_client import get_fno_symbols, fetch_futures_data, fetch_option_chain
+from preopen_analyzer.fno_client import get_fno_symbols
 from preopen_analyzer.fno_scoring import calculate_fno_score, calculate_combined_fno_score
 
 logging.basicConfig(
@@ -161,8 +161,7 @@ class PreOpenAnalyzer:
                 logger.info("No valid F&O candidates found in LONG pool.")
                 return []
 
-            futures_data = self._fetch_futures_data_safe()
-            self._apply_fno_scores(fno_candidates, futures_data)
+            self._apply_fno_scores(fno_candidates)
             self._sort_and_rank_fno(fno_candidates)
 
             logger.info(f"F&O OI-Confirmed: {len(fno_candidates[:10])} stocks ranked.")
@@ -174,6 +173,7 @@ class PreOpenAnalyzer:
 
     def _get_fno_symbol_set(self):
         """Fetch and return the set of F&O eligible symbols."""
+        from preopen_analyzer.fno_client import get_fno_symbols
         symbols = get_fno_symbols()
         return set(symbols) if symbols else set()
 
@@ -181,32 +181,19 @@ class PreOpenAnalyzer:
         """Filter candidates to only include F&O stocks that passed hard filters."""
         return [c for c in candidates_long if not c.is_rejected and c.symbol in fno_symbols]
 
-    def _fetch_futures_data_safe(self):
-        """Fetch futures data with error handling."""
-        try:
-            return fetch_futures_data()
-        except Exception as e:
-            logger.warning(f"Failed to fetch futures data: {e}")
-            return {}
-
-    def _apply_fno_scores(self, fno_candidates, futures_data):
+    def _apply_fno_scores(self, fno_candidates):
         """Apply F&O OI scoring to each candidate."""
+        from preopen_analyzer.fno_client import fetch_fno_data_for_symbol
         for c in fno_candidates:
-            oc_data = self._fetch_option_chain_safe(c.symbol)
+            futures_info, oc_data = fetch_fno_data_for_symbol(c.symbol)
+            futures_data = {c.symbol: futures_info} if futures_info else {}
+            
             fno_result = calculate_fno_score(c.symbol, c.latest_iep, c.prev_close, futures_data, oc_data)
 
             c.fno_buildup = fno_result['buildup_type']
             c.fno_pcr = fno_result['pcr']
             c.fno_oi_score = fno_result['fno_oi_score']
             c.fno_combined_score = calculate_combined_fno_score(c.opening_strength_score, c.fno_oi_score)
-
-    def _fetch_option_chain_safe(self, symbol):
-        """Fetch option chain for a symbol with error handling."""
-        try:
-            return fetch_option_chain(symbol)
-        except Exception as e:
-            logger.warning(f"Failed to fetch option chain for {symbol}: {e}")
-            return None
 
     def _sort_and_rank_fno(self, fno_candidates):
         """Sort F&O candidates by combined score and assign ranks."""
