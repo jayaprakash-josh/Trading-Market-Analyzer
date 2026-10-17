@@ -30,7 +30,22 @@ def get_nse_data(symbol):
             iep = preopen_list[0].get('price')
             
         data['pre_open_volume'] = pre_open_info.get('totalTradedVolume', 0)
+        if iep is None:
+            iep = quote.get('priceInfo', {}).get('lastPrice') or quote.get('orderBook', {}).get('lastPrice')
+            
         data['pre_open_iep'] = iep
+        
+        total_buy = pre_open_info.get('totalBuyQuantity', 0)
+        total_sell = pre_open_info.get('totalSellQuantity', 0)
+        
+        if total_buy == 0 and total_sell == 0:
+            # Try to grab from market depth if preOpen is missing
+            market_depth = quote.get('orderBook', {})
+            total_buy = market_depth.get('totalBuyQuantity', 0)
+            total_sell = market_depth.get('totalSellQuantity', 0)
+            
+        data['buyQty'] = total_buy
+        data['sellQty'] = total_sell
         data['last_price'] = quote.get('priceInfo', {}).get('lastPrice', 0)
         
         # Delivery Percentage (Institutional Footprint)

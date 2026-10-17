@@ -19,8 +19,8 @@ def fetch_and_calculate_technicals(symbol):
     print(f"Fetching data for {yf_symbol}...")
     ticker = yf.Ticker(yf_symbol)
     
-    # Fetch 3 months of data to ensure we have enough for 20-EMA and weekly highs/lows
-    df = ticker.history(period="3mo")
+    # Fetch 1 year of data to ensure the 20-EMA mathematical smoothing perfectly matches TradingView
+    df = ticker.history(period="1y")
     
     if df.empty or len(df) < 3:
         return {"error": f"Insufficient historical data ({len(df)} bars) for {symbol}"}

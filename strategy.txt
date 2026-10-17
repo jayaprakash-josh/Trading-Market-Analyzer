@@ -1,0 +1,1825 @@
+<USER_REQUEST>
+check the below requirement is possible to achevie or not
+You are a quantitative NSE pre-open market analyst, systematic-trading researcher, and senior Python engineer.
+
+Build a production-quality Python application that collects NSE pre-open market data every 30 seconds from approximately 9:00 AM to 9:07 AM and identifies the strongest candidates for a PRE-MARKET LONG trade.
+
+The purpose is NOT to predict the market with certainty.
+
+The purpose is to systematically identify stocks where:
+- pre-open demand is strong
+- demand is persistent
+- demand is improving or stable
+- IEP is stable or improving
+- IEQ is sufficiently large
+- equilibrium imbalance confirms demand
+- market-order imbalance confirms demand
+- liquidity is sufficient
+- the stock is not excessively stretched
+- there is no late deterioration/reversal
+- the potential reward justifies the risk
+
+The system must be deterministic, explainable, configurable and backtestable.
+
+============================================================
+1. PRIMARY OBJECTIVE
+============================================================
+
+At every 30-second snapshot from 09:00 to 09:07:
+
+1. Fetch/ingest the latest NSE pre-open data.
+2. Store the snapshot historically.
+3. Calculate features for every valid stock.
+4. Calculate a score for every valid stock.
+5. Rank all eligible stocks.
+6. Display ONLY the TOP 10 candidates.
+
+At 09:07:00 produce the FINAL decision.
+
+The final output must contain:
+
+- PRIMARY CANDIDATE
+- SECONDARY CANDIDATE
+- WATCH CANDIDATE
+- TOP 10 candidates
+- rejected candidates when useful
+- recommended entry zone
+- target
+- stop-loss
+- risk/reward
+- reversal risk
+- explanation
+
+Do NOT force a trade.
+
+If no stock meets the minimum criteria:
+
+PRIMARY CANDIDATE = NONE
+
+============================================================
+2. DATA COLLECTION WINDOW
+============================================================
+
+Collect approximately:
+
+09:00:00
+09:00:30
+09:01:00
+09:01:30
+09:02:00
+09:02:30
+09:03:00
+09:03:30
+09:04:00
+09:04:30
+09:05:00
+09:05:30
+09:06:00
+09:06:30
+09:07:00
+
+Expected number of snapshots = approximately 15.
+
+Make the schedule configurable.
+
+IMPORTANT:
+
+The system must NEVER use information after 09:07:00 when producing the 09:07 decision.
+
+No look-ahead bias.
+
+Do not use:
+- actual 09:15 opening price
+- 09:15+ volume
+- post-open price movement
+- day high/low
+- later news
+- later order-book information
+
+for the 09:07 decision.
+
+============================================================
+3. INPUT DATA
+============================================================
+
+Expected NSE fields may include:
+
+SYMBOL
+PREV CLOSE
+BEST BID QTY
+BEST BID PRICE
+BEST ASK PRICE
+BEST ASK QTY
+IEQ
+IEP
+CHANGE
+%CHANGE
+FINAL PRICE
+FINAL VOLUME
+VALUE
+FFM CAP
+INDICATIVE IMBALANCE QUANTITY AT EQUILIBRIUM PRICE
+INDICATIVE IMBALANCE QUANTITY AT MARKET ORDER
+52 WEEK HIGH
+52 WEEK LOW
+
+Column names may vary.
+
+Build a normalization layer that maps NSE column names into standard internal names.
+
+For example:
+
+symbol
+prev_close
+best_bid_qty
+best_bid_price
+best_ask_price
+best_ask_qty
+ieq
+iep
+change
+change_pct
+final_price
+final_volume
+value_cr
+ffm_cap_cr
+eq_imbalance_qty
+market_order_imbalance_qty
+week52_high
+week52_low
+timestamp
+
+Handle missing columns gracefully.
+
+Never silently fabricate values.
+
+============================================================
+4. DATA STORAGE
+============================================================
+
+Persist every snapshot.
+
+Recommended structure:
+
+timestamp
+symbol
+all normalized fields
+calculated features
+score
+
+Do NOT overwrite previous snapshots.
+
+A stock's complete timeline from 09:00 to 09:07 must be available.
+
+Example:
+
+SYMBOL = ABC
+
+09:00
+IEP
+IEQ
+EQ imbalance
+MO imbalance
+
+09:00:30
+IEP
+IEQ
+EQ imbalance
+MO imbalance
+
+...
+
+09:07
+IEP
+IEQ
+EQ imbalance
+MO imbalance
+
+============================================================
+5. BASIC FEATURES
+============================================================
+
+For every stock calculate:
+
+------------------------------------------------------------
+A. GAP PERCENT
+------------------------------------------------------------
+
+gap_pct =
+    ((latest_iep / prev_close) - 1) * 100
+
+Positive = bullish gap
+Negative = bearish gap
+
+Do not reward gap linearly.
+
+A +2% gap should not automatically score better than a +5% gap.
+
+Large gaps become increasingly stretched.
+
+Suggested conceptual buckets:
+
+0% to +1%:
+small positive gap
+
++1% to +2%:
+healthy gap
+
++2% to +4%:
+strong gap
+
++4% to +5%:
+very strong but increasingly stretched
+
+> +5%:
+extreme / investigate price-band conditions
+
+Make these configurable.
+
+------------------------------------------------------------
+B. EXECUTABLE VALUE
+------------------------------------------------------------
+
+executable_value_cr =
+    (latest_iep * latest_ieq) / 10,000,000
+
+Use:
+- IEQ
+- executable value
+
+Do NOT compare raw IEQ alone across stocks with very different prices.
+
+------------------------------------------------------------
+C. EQUILIBRIUM IMBALANCE RATIO
+------------------------------------------------------------
+
+eq_imbalance_ratio =
+    eq_imbalance_qty / max(ieq, 1)
+
+Positive = excess demand
+Negative = excess supply
+
+This is one of the most important signals.
+
+------------------------------------------------------------
+D. MARKET-ORDER IMBALANCE RATIO
+------------------------------------------------------------
+
+mo_imbalance_ratio =
+    market_order_imbalance_qty / max(ieq, 1)
+
+Positive = bullish
+Negative = bearish
+
+------------------------------------------------------------
+E. COMBINED DEMAND SCORE
+------------------------------------------------------------
+
+Create:
+
+combined_demand =
+    0.70 * normalized(eq_imbalance_ratio)
+    +
+    0.30 * normalized(mo_imbalance_ratio)
+
+The weights must be configurable.
+
+Equilibrium imbalance should have greater importance.
+
+============================================================
+6. TIME-SERIES ANALYSIS
+============================================================
+
+The most important advantage of collecting every 30 seconds is that the model can identify whether the signal is:
+
+A. strengthening
+B. stable
+C. weakening
+D. reversing
+
+Do NOT rely only on the latest snapshot.
+
+------------------------------------------------------------
+A. IEP SLOPE
+------------------------------------------------------------
+
+Calculate:
+
+iep_slope
+
+using linear regression over all valid snapshots.
+
+Also calculate:
+
+iep_slope_recent
+
+using only the most recent 3-5 snapshots.
+
+Positive slope = improving
+Negative slope = weakening
+
+Recent slope should receive more weight than early slope.
+
+------------------------------------------------------------
+B. IEQ SLOPE
+------------------------------------------------------------
+
+Calculate:
+
+ieq_slope
+ieq_slope_recent
+
+Positive = participation increasing
+Negative = participation decreasing
+
+------------------------------------------------------------
+C. EQUILIBRIUM IMBALANCE TREND
+------------------------------------------------------------
+
+Calculate:
+
+eq_imbalance_slope
+eq_imbalance_ratio_slope
+
+Reward:
+- rising demand
+- stable strong demand
+
+Penalize:
+- collapsing demand
+- sign reversal
+
+------------------------------------------------------------
+D. MARKET-ORDER IMBALANCE TREND
+------------------------------------------------------------
+
+Calculate:
+
+mo_imbalance_slope
+mo_imbalance_ratio_slope
+
+Reward persistent positive values.
+
+Penalize:
+- weakening
+- sign reversal
+
+============================================================
+7. PERSISTENCE SCORE
+============================================================
+
+For every snapshot define:
+
+bullish_snapshot =
+    eq_imbalance_qty > 0
+    AND market_order_imbalance_qty >= 0
+
+Calculate:
+
+bullish_persistence =
+    bullish_snapshots / valid_snapshots
+
+Also calculate:
+
+latest_5_bullish_pct
+latest_3_bullish_pct
+
+Recent snapshots should have higher importance.
+
+Example:
+
+15/15 bullish
+= excellent persistence
+
+12/15 bullish
+= good
+
+8/15
+= mixed
+
+5/15
+= weak
+
+------------------------------------------------------------
+TIME AT TOP
+------------------------------------------------------------
+
+Track:
+
+- number of times stock was #1
+- number of times stock was in Top 3
+- number of times stock was in Top 10
+- consecutive snapshots in Top 10
+- consecutive snapshots in Top 3
+- consecutive snapshots at #1
+
+This should be informational and optionally included in scoring.
+
+Do not allow a stock to dominate merely because it briefly spikes to #1.
+
+============================================================
+8. LATE REVERSAL DETECTION
+============================================================
+
+This is CRITICAL.
+
+The system must identify stocks whose early bullish signal deteriorates near 09:07.
+
+Example:
+
+09:00
+IEP +4.8%
+EQ imbalance +5M
+
+09:02
+IEP +5.0%
+EQ imbalance +5.5M
+
+09:04
+IEP +5.0%
+EQ imbalance +4.8M
+
+09:05
+IEP +4.6%
+EQ imbalance +3M
+
+09:06
+IEP +3.2%
+EQ imbalance +500K
+
+09:06:30
+IEP +2.0%
+EQ imbalance +100K
+
+09:07
+IEP +1%
+EQ imbalance -100K
+
+This MUST be classified as:
+
+LATE REVERSAL = TRUE
+
+and heavily penalized or rejected.
+
+------------------------------------------------------------
+REVERSAL CONDITIONS
+------------------------------------------------------------
+
+Flag reversal when one or more are true:
+
+1. Strong positive early imbalance becomes negative late.
+2. IEP falls materially from the maximum.
+3. IEQ collapses late.
+4. Market-order imbalance turns sharply negative.
+5. Last 3 snapshots disagree with the earlier trend.
+6. Combined demand score deteriorates rapidly.
+7. IEP trend changes from positive to strongly negative.
+
+Create a configurable reversal severity:
+
+LOW
+MEDIUM
+HIGH
+CRITICAL
+
+============================================================
+9. IEP STABILITY
+============================================================
+
+Calculate:
+
+max_iep
+min_iep
+final_iep
+iep_range
+iep_std
+iep_drawdown_from_max
+
+Formula:
+
+iep_drawdown_pct =
+    ((max_iep - final_iep) / prev_close) * 100
+
+A stock whose IEP peaked strongly but falls materially before 09:07 should be penalized.
+
+Example:
+
+Max IEP = 35.50
+Final IEP = 33.92
+Prev close = 33.82
+
+This is a serious deterioration.
+
+The system must detect this automatically.
+
+============================================================
+10. IEQ STABILITY
+============================================================
+
+Calculate:
+
+max_ieq
+min_ieq
+final_ieq
+ieq_slope
+ieq_change_pct
+ieq_recent_change_pct
+
+Penalize:
+
+- sudden collapse
+- repeated falling IEQ
+- final IEQ materially below recent peak
+
+Reward:
+
+- stable strong IEQ
+- steadily rising IEQ
+
+============================================================
+11. LIQUIDITY
+============================================================
+
+Liquidity is critical.
+
+Calculate:
+
+IEQ
+EXECUTABLE_VALUE_CR
+BEST_BID_QTY
+BEST_ASK_QTY
+BID/ASK SPREAD
+
+Do not rank a stock highly merely because it has an impressive percentage gap.
+
+Example:
+
+Stock A:
++10% gap
+IEQ = 50
+
+Stock B:
++2% gap
+IEQ = 100,000
+
+Stock B should normally be considered more tradeable.
+
+Create configurable minimum thresholds for:
+
+- IEQ
+- executable value
+- bid quantity
+- ask quantity
+
+============================================================
+12. BID/ASK QUALITY
+============================================================
+
+Calculate:
+
+spread =
+    best_ask_price - best_bid_price
+
+spread_pct =
+    spread / max(iep, 1) * 100
+
+Calculate:
+
+depth_ratio =
+    best_bid_qty / max(best_ask_qty, 1)
+
+Penalize:
+- extremely wide spread
+- extremely thin book
+
+Do not over-reward abnormal bid depth without confirming IEQ and imbalance.
+
+============================================================
+13. STRETCH / CHASE RISK
+============================================================
+
+A strong gap is not automatically a good entry.
+
+Calculate:
+
+gap_pct
+
+and distance from:
+- upper price band
+- lower price band
+- 52-week high
+- 52-week low
+
+If official price-band data exists, use it.
+
+Otherwise do NOT invent the price band.
+
+Classify:
+
+STRETCH_RISK =
+LOW
+MEDIUM
+HIGH
+EXTREME
+
+Examples:
+
++1.5% gap + strong demand
+= potentially healthy
+
++4.9% gap + strong demand
+= strong but stretched
+
++5% gap + price at upper band
+= extreme chase risk
+
++10% or +20% gap
+= extreme
+
+Large gaps should not automatically be rejected, but they should require stronger confirmation.
+
+============================================================
+14. 52-WEEK STRUCTURE
+============================================================
+
+Calculate:
+
+distance_to_52w_high_pct
+distance_to_52w_low_pct
+
+Also identify:
+
+above_52w_high
+near_52w_high
+near_52w_low
+
+A bullish gap above the 52-week high can be a breakout signal.
+
+However:
+
+Do not automatically assign a large bonus simply because price is above the 52-week high.
+
+Use it as supporting evidence.
+
+============================================================
+15. MARKET CONTEXT
+============================================================
+
+Allow optional external market data:
+
+NIFTY
+BANKNIFTY
+GIFT NIFTY
+INDIA VIX
+FII NET
+DII NET
+sector performance
+
+Calculate:
+
+MARKET_BIAS
+
+Possible values:
+
+BULLISH
+NEUTRAL
+BEARISH
+
+Market bias must be a MODIFIER, NOT the primary signal.
+
+Examples:
+
+Strong stock + bearish market
+→ modest penalty
+
+Strong stock + neutral market
+→ neutral
+
+Strong stock + bullish market
+→ modest bonus
+
+Do NOT reject all longs just because NIFTY is bearish.
+
+============================================================
+16. NEWS / CATALYST
+============================================================
+
+Allow optional news input.
+
+Possible values:
+
+FRESH_POSITIVE
+POSITIVE_BACKGROUND
+NO_CLEAR_CATALYST
+UNKNOWN
+FRESH_NEGATIVE
+
+A fresh positive catalyst may receive a small bonus.
+
+A fresh negative catalyst should create a strong penalty.
+
+Do NOT fabricate news.
+
+Do NOT use old news as if it is fresh.
+
+Do NOT allow news to override strongly contradictory auction data.
+
+============================================================
+17. CROSS-SECTIONAL NORMALIZATION
+============================================================
+
+Raw values are not comparable.
+
+Normalize major features across all eligible stocks in the current snapshot.
+
+Preferred:
+
+percentile ranks
+
+or robust scaling.
+
+Avoid ordinary z-scores when extreme outliers distort the distribution.
+
+Winsorize extreme outliers where appropriate.
+
+Examples of normalized features:
+
+gap_score
+ieq_score
+eq_imbalance_score
+mo_imbalance_score
+iep_trend_score
+ieq_trend_score
+persistence_score
+liquidity_score
+
+============================================================
+18. BASE SCORE
+============================================================
+
+Create a PREMARKET_SCORE from 0 to 100.
+
+Recommended weights:
+
+IEP GAP QUALITY                    15
+IEQ / EXECUTABLE VALUE             15
+EQUILIBRIUM IMBALANCE               20
+MARKET-ORDER IMBALANCE              10
+IEP TREND / MOMENTUM                10
+IEP STABILITY                       10
+IMBALANCE PERSISTENCE                8
+IMBALANCE TREND                      5
+LIQUIDITY / SPREAD                   4
+MARKET CONTEXT                       3
+
+TOTAL                               100
+
+All weights must be configurable.
+
+The scoring system must be documented.
+
+============================================================
+19. PENALTIES
+============================================================
+
+Apply penalties after calculating the base score.
+
+Recommended penalty categories:
+
+LATE REVERSAL                   -20
+SEVERE IMBALANCE COLLAPSE       -15
+IEP DRAWDOWN FROM MAX            -10
+EXTREME STRETCH                   -10
+VERY LOW IEQ                      -15
+LOW EXECUTABLE VALUE              -10
+WIDE SPREAD                       -10
+CONTRADICTORY ORDER FLOW          -10
+POOR DATA QUALITY                 -15
+
+Do not allow final score below 0.
+
+FINAL_SCORE =
+    BASE_SCORE
+    - PENALTIES
+    + BONUSES
+
+Clamp:
+
+0 <= FINAL_SCORE <= 100
+
+============================================================
+20. CONTRADICTION DETECTION
+============================================================
+
+Explicitly detect contradictory signals.
+
+Examples:
+
+Positive gap
+BUT
+negative equilibrium imbalance
+
+Positive gap
+BUT
+falling IEP
+
+Positive gap
+BUT
+IEQ collapsing
+
+Positive gap
+BUT
+negative market-order imbalance
+
+Strong early demand
+BUT
+weak late demand
+
+These stocks should not rank highly simply because the gap is large.
+
+Create:
+
+SIGNAL_CONSISTENCY_SCORE
+
+from 0 to 100.
+
+============================================================
+21. HARD REJECTION RULES
+============================================================
+
+Reject a stock before ranking if:
+
+1. IEP unavailable at 09:07
+2. IEQ invalid or zero
+3. executable value below configured minimum
+4. severe negative equilibrium imbalance at 09:07
+5. severe negative market-order imbalance at 09:07
+6. critical late reversal
+7. price fields invalid
+8. stock not tradeable
+9. spread abnormally high
+10. insufficient valid snapshots
+11. data quality below threshold
+
+Make all rules configurable.
+
+============================================================
+22. DATA QUALITY
+============================================================
+
+Calculate:
+
+DATA_QUALITY_SCORE 0-100
+
+based on:
+
+- valid snapshots
+- missing values
+- duplicated snapshots
+- invalid timestamps
+- invalid numeric values
+- missing IEP
+- missing IEQ
+- missing imbalance
+- timestamp consistency
+
+Example:
+
+15/15 valid snapshots
+= high quality
+
+8/15 valid
+= poor quality
+
+Poor data quality must reduce ranking or reject the stock.
+
+============================================================
+23. SCORE UPDATE EVERY 30 SECONDS
+============================================================
+
+At every 30-second snapshot:
+
+1. Update time series.
+2. Recalculate all features.
+3. Recalculate score.
+4. Re-rank all eligible stocks.
+5. Display TOP 10 only.
+
+Example:
+
+09:00:00
+TOP 10
+
+09:00:30
+TOP 10
+
+09:01:00
+TOP 10
+
+...
+
+09:07:00
+FINAL TOP 10
+
+The Top 10 can change between snapshots.
+
+============================================================
+24. DASHBOARD REFRESH
+============================================================
+
+The data collection frequency is 30 seconds.
+
+The dashboard may refresh more frequently, such as every 5-15 seconds, BUT:
+
+Do NOT pretend new NSE data exists between snapshots.
+
+Example:
+
+09:00:00
+NEW NSE DATA
+calculate
+
+09:00:15
+same latest NSE data
+display only
+
+09:00:30
+NEW NSE DATA
+recalculate
+
+The scoring engine should normally recalculate only when new data arrives.
+
+============================================================
+25. RANK STABILITY
+============================================================
+
+Track:
+
+current_rank
+previous_rank
+rank_change
+times_in_top_10
+times_in_top_3
+times_at_rank_1
+consecutive_top_10_snapshots
+consecutive_top_3_snapshots
+consecutive_rank_1_snapshots
+
+Example:
+
+#5 → #2
+= strengthening
+
+#2 → #6
+= weakening
+
+#1 for 5 minutes
+= persistent
+
+#1 for 30 seconds only
+= unstable
+
+Use rank persistence as supporting evidence.
+
+Do not allow a single 30-second spike to dominate.
+
+============================================================
+26. FINAL 09:07 DECISION
+============================================================
+
+At exactly 09:07:
+
+Generate:
+
+A. FINAL TOP 10
+B. PRIMARY CANDIDATE
+C. SECONDARY CANDIDATE
+D. WATCH CANDIDATE
+E. AVOID LIST
+
+PRIMARY CANDIDATE must satisfy:
+
+- positive gap
+- sufficient IEQ
+- sufficient executable value
+- positive equilibrium imbalance
+- positive market-order imbalance
+- strong persistence
+- stable or rising IEP
+- stable or rising IEQ
+- no significant late reversal
+- acceptable spread
+- acceptable liquidity
+- acceptable stretch risk
+- acceptable risk/reward
+- adequate data quality
+
+If no stock satisfies the conditions:
+
+PRIMARY CANDIDATE = NONE
+
+Never force a trade.
+
+============================================================
+27. PRIMARY VS SECONDARY
+============================================================
+
+Do NOT simply choose:
+
+PRIMARY = score #1
+
+Instead require:
+
+PRIMARY:
+highest score among stocks meeting all hard requirements
+
+SECONDARY:
+next strongest qualifying stock
+
+WATCH:
+interesting but missing one important condition
+
+Example:
+
+Stock A score 91
+but severe late reversal
+
+Stock B score 87
+all conditions healthy
+
+Then:
+
+PRIMARY = Stock B
+Stock A = REJECTED
+
+============================================================
+28. ENTRY LOGIC
+============================================================
+
+Calculate:
+
+latest_iep
+prev_close
+gap_pct
+
+Do NOT automatically recommend market-buying at the IEP.
+
+Provide:
+
+AGGRESSIVE_ENTRY
+CONSERVATIVE_ENTRY
+CHASE_AVOID_LEVEL
+
+Entry logic should consider:
+
+- latest IEP
+- price stability
+- spread
+- stretch
+- gap
+- liquidity
+- order-flow strength
+
+If the stock is already at/near an upper price band:
+
+CHASE_AVOID = TRUE
+
+A large gap should not automatically result in buying at the displayed IEP.
+
+============================================================
+29. TARGET LOGIC
+============================================================
+
+The trader is interested in approximately 1.5%-3% short-term moves.
+
+Make target configurable.
+
+Default target candidates:
+
+1.5%
+2.0%
+2.5%
+
+Do NOT blindly use 2% for every stock.
+
+Adjust target based on:
+
+- gap
+- volatility proxy
+- liquidity
+- price structure
+- stretch
+- momentum
+- historical backtest results once available
+
+Return:
+
+TARGET_1
+TARGET_2
+
+============================================================
+30. STOP-LOSS LOGIC
+============================================================
+
+Calculate a suggested SL based on:
+
+- entry
+- recent pre-open volatility
+- IEP stability
+- gap
+- liquidity
+- price structure
+
+Do NOT use an arbitrary fixed 5% SL.
+
+The stop must be close enough to control risk but not so tight that normal volatility constantly triggers it.
+
+Return:
+
+STOP_LOSS
+
+Also calculate:
+
+RISK_PERCENT
+
+============================================================
+31. RISK/REWARD
+============================================================
+
+Calculate:
+
+reward_percent =
+    ((target - entry) / entry) * 100
+
+risk_percent =
+    ((entry - stop_loss) / entry) * 100
+
+reward_risk_ratio =
+    reward_percent / risk_percent
+
+Allow configurable minimum R:R.
+
+Reject candidates whose expected reward/risk is below the threshold.
+
+============================================================
+32. GTT COMPATIBILITY
+============================================================
+
+The system should output levels suitable for a GTT/OCO order concept.
+
+For a LONG:
+
+Entry
+
+Target:
+- trigger price
+- sell limit price
+
+Stop:
+- trigger price
+- sell limit price
+
+Example:
+
+Entry = 340.00
+
+Target trigger = 346.80
+Target limit = 346.70
+
+SL trigger = 334.00
+SL limit = 333.90
+
+The exact buffer must be configurable.
+
+IMPORTANT:
+These are suggested levels, not guaranteed execution prices.
+
+Do not assume a stop order will always execute exactly at the trigger price.
+
+============================================================
+33. WIN PROBABILITY
+============================================================
+
+DO NOT output fake probabilities.
+
+Never say:
+
+"70% chance of profit"
+
+unless enough historical backtest data exists.
+
+Before backtesting, output:
+
+SIGNAL_CONFIDENCE
+
+This is model confidence, NOT probability of winning.
+
+Once historical data exists, calculate actual statistics.
+
+============================================================
+34. BACKTESTING
+============================================================
+
+Design the application so historical pre-open snapshots can be tested.
+
+For every historical day:
+
+Use only data available through 09:07.
+
+Then compare with actual post-open price movement:
+
+- actual 09:15 opening price
+- 5-minute high
+- 5-minute low
+- 15-minute high
+- 15-minute low
+- 30-minute high
+- 30-minute low
+- closing price
+
+Evaluate:
+
+TARGET HIT
+STOP HIT
+NEITHER
+TARGET BEFORE STOP
+STOP BEFORE TARGET
+
+Calculate:
+
+win rate
+loss rate
+average win
+average loss
+median win
+median loss
+maximum favorable excursion
+maximum adverse excursion
+average return
+median return
+profit factor
+expectancy
+average holding time
+max losing streak
+
+============================================================
+35. EXPECTANCY
+============================================================
+
+Calculate:
+
+EXPECTANCY =
+    (win_rate * average_win)
+    -
+    (loss_rate * average_loss)
+
+This is more important than raw win rate.
+
+Example:
+
+Strategy A:
+75% win rate
+but huge losses
+
+Strategy B:
+55% win rate
+smaller losses and larger wins
+
+Do not assume Strategy A is better.
+
+============================================================
+36. TARGET/SL OPTIMIZATION
+============================================================
+
+Once enough historical data exists, test combinations such as:
+
+Target:
+1.0%
+1.5%
+2.0%
+2.5%
+3.0%
+
+Stop:
+0.75%
+1.0%
+1.25%
+1.5%
+2.0%
+2.5%
+
+Evaluate by:
+
+expectancy
+profit factor
+drawdown
+win rate
+average return
+
+Do not optimize solely for win rate.
+
+Avoid overfitting.
+
+============================================================
+37. NO LOOK-AHEAD BIAS
+============================================================
+
+This rule is mandatory.
+
+At 09:07 decision time, the model may use ONLY:
+
+09:00–09:07 NSE pre-open data
+plus market/news information that was actually available by then.
+
+It must NOT use:
+
+09:08 data
+09:10 data
+09:15 opening price
+post-open price
+post-open volume
+later news
+later announcements
+
+When backtesting, enforce this strictly.
+
+============================================================
+38. OUTPUT — TOP 10
+============================================================
+
+At every 30-second snapshot display:
+
+RANK
+SYMBOL
+FINAL_SCORE
+SIGNAL_CONFIDENCE
+PREV_CLOSE
+LATEST_IEP
+GAP_PCT
+IEQ
+EXECUTABLE_VALUE_CR
+EQ_IMBALANCE_RATIO
+MO_IMBALANCE_RATIO
+IEP_SLOPE
+IEQ_SLOPE
+BULLISH_PERSISTENCE
+LATEST_3_BULLISH
+LATEST_5_BULLISH
+RANK_CHANGE
+TOP_10_PERSISTENCE
+IEP_DRAWDOWN
+SPREAD_PCT
+SIGNAL_CONSISTENCY
+STRETCH_RISK
+REVERSAL_RISK
+MARKET_BIAS
+CATALYST
+ENTRY_ZONE
+TARGET_1
+TARGET_2
+STOP_LOSS
+RISK_PERCENT
+REWARD_PERCENT
+REWARD_RISK
+SIGNAL
+REASON
+WARNING
+
+Sort by FINAL_SCORE descending.
+
+Display only Top 10.
+
+============================================================
+39. FINAL 09:07 REPORT
+============================================================
+
+At 09:07 generate something like:
+
+==================================================
+NSE PRE-MARKET FINAL REPORT
+TIME: 09:07:00
+==================================================
+
+MARKET BIAS:
+BEARISH / NEUTRAL / BULLISH
+
+PRIMARY:
+SYMBOL
+SCORE
+IEP
+GAP
+IEQ
+EQ IMBALANCE
+MO IMBALANCE
+PERSISTENCE
+IEP TREND
+REVERSAL RISK
+ENTRY
+TARGET
+SL
+R:R
+REASON
+
+SECONDARY:
+...
+
+WATCH:
+...
+
+AVOID:
+...
+
+==================================================
+TOP 10
+==================================================
+
+1. ...
+2. ...
+...
+10. ...
+
+==================================================
+40. REJECTION EXPLANATIONS
+==================================================
+
+The system should optionally explain why obvious-looking stocks were rejected.
+
+Examples:
+
+"LARGE GAP BUT IEQ TOO LOW"
+
+"IEP STRONG EARLY BUT COLLAPSED BY 09:07"
+
+"POSITIVE IEP BUT NEGATIVE EQUILIBRIUM IMBALANCE"
+
+"STRONG BUY IMBALANCE BUT EXCESSIVELY STRETCHED"
+
+"GOOD GAP BUT MARKET-ORDER FLOW TURNED NEGATIVE"
+
+This is important.
+
+Do not only tell the user what was selected.
+
+Also explain why tempting candidates were rejected.
+
+============================================================
+41. AVOID LIST
+============================================================
+
+Create an explicit list of high-risk/invalid candidates.
+
+For example:
+
+EXTREME GAP
+LOW LIQUIDITY
+LATE REVERSAL
+NEGATIVE ORDER FLOW
+WIDE SPREAD
+POOR DATA
+EXCESSIVE STRETCH
+CONTRADICTORY SIGNAL
+
+============================================================
+42. VISUALIZATION
+============================================================
+
+For each Top 10 candidate optionally generate time-series plots:
+
+1. IEP vs time
+2. IEQ vs time
+3. EQ imbalance vs time
+4. MO imbalance vs time
+5. PREMARKET_SCORE vs time
+
+These graphs must clearly show:
+
+- strengthening
+- weakening
+- stable demand
+- collapse
+- reversal
+
+Do not use post-09:07 data in the decision visualization.
+
+============================================================
+43. CONFIGURATION
+============================================================
+
+Put all major parameters in one configuration object/file.
+
+Examples:
+
+FETCH_INTERVAL_SECONDS = 30
+START_TIME = 09:00
+DECISION_TIME = 09:07
+
+MIN_IEQ
+MIN_EXECUTABLE_VALUE
+MIN_DATA_QUALITY
+
+GAP_WEIGHTS
+IEQ_WEIGHT
+EQ_IMBALANCE_WEIGHT
+MO_IMBALANCE_WEIGHT
+
+PERSISTENCE_THRESHOLDS
+REVERSAL_THRESHOLDS
+STRETCH_THRESHOLDS
+
+TARGET_OPTIONS
+STOP_OPTIONS
+MIN_REWARD_RISK
+
+Make it easy to change without editing core logic.
+
+============================================================
+44. CODE ARCHITECTURE
+============================================================
+
+Use clean modules:
+
+config.py
+models.py
+data_loader.py
+nse_client.py
+normalizer.py
+feature_engineering.py
+time_series.py
+scoring.py
+filters.py
+reversal_detector.py
+market_context.py
+news_context.py
+entry_exit.py
+report.py
+visualization.py
+backtest.py
+main.py
+
+Use type hints.
+
+Use dataclasses or Pydantic models where appropriate.
+
+Use logging.
+
+Use exception handling.
+
+Do not crash because one stock is malformed.
+
+============================================================
+45. OUTPUT FILES
+============================================================
+
+Generate:
+
+latest_snapshot.csv
+top10_current.csv
+top10_history.csv
+final_0907_report.csv
+rejected_candidates.csv
+feature_matrix.csv
+daily_scores.csv
+
+Also optionally:
+
+final_report.json
+
+============================================================
+46. TEST CASES
+============================================================
+
+Create unit tests for at least these cases.
+
+TEST 1:
+Strong positive gap
+Strong IEQ
+Strong positive equilibrium imbalance
+Strong positive market-order imbalance
+Stable/increasing IEP
+Stable/increasing IEQ
+
+Expected:
+HIGH SCORE
+
+TEST 2:
+Strong +5% gap
+IEQ extremely low
+
+Expected:
+REJECT or strongly penalize
+
+TEST 3:
+Strong early bullish signal
+Late IEP collapse
+Late imbalance collapse
+
+Expected:
+LATE REVERSAL = TRUE
+NOT PRIMARY
+
+TEST 4:
+Positive gap
+Negative equilibrium imbalance
+
+Expected:
+SIGNAL CONSISTENCY LOW
+
+TEST 5:
+Moderate +1.5% gap
+Large IEQ
+Strong persistent demand
+Good liquidity
+Stable IEP
+
+Expected:
+Can outrank a stretched +5% stock
+
+TEST 6:
+Gap-down stock
+Strong negative imbalance
+
+Expected:
+NOT a LONG candidate
+
+TEST 7:
+Large gap
+Strong demand
+But almost at upper price band
+
+Expected:
+HIGH STRETCH RISK
+
+TEST 8:
+Stock #1 for only one snapshot
+Stock #2 top 3 for 10 consecutive snapshots
+
+Expected:
+Stock #2 should generally have stronger persistence characteristics.
+
+============================================================
+47. IMPORTANT DESIGN PRINCIPLE
+============================================================
+
+The system must answer:
+
+"At 09:07 AM, which stocks have the strongest combination of persistent demand, executable liquidity, stable/increasing IEP, stable/increasing IEQ, positive equilibrium imbalance, positive market-order imbalance, and sufficient room for a profitable trade?"
+
+It must NOT answer:
+
+"Which stock has the highest IEP?"
+
+The following hierarchy should guide the model:
+
+1. PERSISTENT ORDER FLOW
+2. EQUILIBRIUM IMBALANCE
+3. IEQ / EXECUTABLE LIQUIDITY
+4. IEP STABILITY / TREND
+5. MARKET-ORDER CONFIRMATION
+6. GAP QUALITY
+7. STRETCH / CHASE RISK
+8. MARKET CONTEXT
+9. CATALYST
+
+============================================================
+48. MOST IMPORTANT REAL-WORLD LESSON
+============================================================
+
+A displayed +5% IEP at one moment is NOT enough.
+
+Example:
+
+09:00 IEP = +5%
+09:02 IEP = +5%
+09:04 IEP = +5%
+09:06 IEP = +3%
+09:07 IEP = +1%
+
+This stock must lose substantial points.
+
+Another example:
+
+09:00 IEP = +1%
+09:02 IEP = +1.2%
+09:04 IEP = +1.5%
+09:06 IEP = +1.7%
+09:07 IEP = +1.9%
+
+with:
+
+IEQ increasing
+EQ imbalance increasing
+MO imbalance positive
+high liquidity
+low reversal risk
+
+This stock should score very well even though its final gap is much smaller.
+
+============================================================
+49. FINAL TRADING PHILOSOPHY
+============================================================
+
+The purpose is NOT to maximize the number of trades.
+
+The purpose is to identify only situations where multiple independent signals align.
+
+Therefore:
+
+FEWER HIGH-QUALITY SIGNALS > MANY WEAK SIGNALS
+
+If the data is ambiguous:
+
+CAUTION or NO-GO
+
+If the signal is contradictory:
+
+NO-GO
+
+If there is no strong candidate:
+
+PRIMARY = NONE
+
+Never force the model to select a stock.
+
+============================================================
+50. FINAL DELIVERABLE
+============================================================
+
+Generate the complete runnable Python project.
+
+Include:
+
+1. Full source code
+2. Configuration
+3. requirements.txt
+4. README.md
+5. Unit tests
+6. Example input data
+7. Example output
+8. Backtesting framework
+9. Logging
+10. Error handling
+11. Clear comments explaining every scoring component
+
+The implementation should be production-quality rather than a toy example.
+
+The scoring must be deterministic and explainable.
+
+Do not hide scoring logic inside opaque AI reasoning.
+
+The Python program itself must calculate the scores deterministically.
+
+AI may be used later for:
+- explaining the results
+- summarizing news
+- generating human-readable reasoning
+
+but the core ranking must remain deterministic.
+
+============================================================
+FINAL REQUIRED OUTPUT AT 09:07
+============================================================
+
+Show:
+
+MARKET BIAS
+
+PRIMARY CANDIDATE
+SECONDARY CANDIDATE
+WATCH CANDIDATE
+
+TOP 10 TABLE
+
+and for PRIMARY:
+
+ENTRY ZONE
+TARGET
+STOP LOSS
+RISK %
+REWARD %
+R:R
+SIGNAL CONFIDENCE
+IEP
+GAP
+IEQ
+EQ IMBALANCE
+MO IMBALANCE
+IEP TREND
+IEQ TREND
+PERSISTENCE
+REVERSAL RISK
+STRETCH RISK
+LIQUIDITY
+REASON
+
+If nothing qualifies:
+
+PRIMARY CANDIDATE = NONE
+
+Do not force a trade.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-27T15:12:40+05:30.
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from Gemini 3.1 Pro (High) to Claude Opus 4.6 (Thinking). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>

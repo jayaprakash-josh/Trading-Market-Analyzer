@@ -3,7 +3,7 @@ from datetime import datetime
 from config import TIERS, TRADING_CAPITAL, RISK_PER_TRADE_PERCENT
 import json
 
-def generate_html_report(results, fii_dii, global_cues):
+def generate_html_report(results, fii_dii, global_cues, suffix=""):
     date_str = datetime.now().strftime('%Y-%m-%d')
     time_str = datetime.now().strftime('%H:%M:%S')
     
@@ -12,7 +12,7 @@ def generate_html_report(results, fii_dii, global_cues):
     reports_dir = os.path.join(project_root, "docs", "premarket_reports")
     os.makedirs(reports_dir, exist_ok=True)
     
-    filepath = os.path.join(reports_dir, f"Premarket_Report_{date_str}.html")
+    filepath = os.path.join(reports_dir, f"Premarket_Report_{date_str}{suffix}.html")
     
     # Helper to colorize signals
     def get_signal_color(signal):

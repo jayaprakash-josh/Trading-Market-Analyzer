@@ -4,25 +4,51 @@ import feedparser
 import urllib.parse
 import json
 
-def fetch_stock_news(symbol, limit=3):
+def fetch_stock_news(symbol, limit=5):
     """
     Fetches the latest news headlines for a stock using Google News RSS.
     """
-    # URL encode the query
-    query = urllib.parse.quote(f"{symbol} NSE India")
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-    
-    feed = feedparser.parse(url)
-    news_items = []
-    
-    for entry in feed.entries[:limit]:
-        news_items.append({
-            "title": entry.title,
-            "link": entry.link,
-            "published": entry.published
-        })
+    try:
+        query = urllib.parse.quote(f"{symbol} NSE India")
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
         
-    return news_items
+        feed = feedparser.parse(url)
+        news_items = []
+        
+        for entry in feed.entries[:limit]:
+            news_items.append({
+                "title": entry.title,
+                "link": entry.link,
+                "published": entry.published,
+                "source": "GoogleNews RSS"
+            })
+                
+        return news_items
+    except Exception as e:
+        print(f"Error fetching news for {symbol}: {e}")
+        return []
+
+def fetch_market_news(limit=5):
+    """
+    Fetches general Indian Stock Market news.
+    """
+    try:
+        query = urllib.parse.quote("Indian Stock Market Nifty Sensex NSE")
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+        
+        feed = feedparser.parse(url)
+        news_items = []
+        
+        for entry in feed.entries[:limit]:
+            news_items.append({
+                "title": entry.title,
+                "link": entry.link,
+                "published": entry.published
+            })
+                
+        return news_items
+    except Exception:
+        return []
 
 def fetch_fii_dii_data():
     """
@@ -56,15 +82,3 @@ def fetch_fii_dii_data():
         
     except Exception as e:
         return {"error": str(e)}
-
-if __name__ == "__main__":
-    print("--- MODULE 2A: SENTIMENT & MACRO SCRAPER TEST ---")
-    
-    print("\n1. Fetching News for M&M...")
-    news = fetch_stock_news("M&M")
-    for n in news:
-        print(f" - {n['title']} ({n['published']})")
-        
-    print("\n2. Fetching FII/DII Data...")
-    fii_dii = fetch_fii_dii_data()
-    print(json.dumps(fii_dii, indent=2))

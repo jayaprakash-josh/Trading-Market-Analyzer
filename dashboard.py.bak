@@ -1,0 +1,228 @@
+import streamlit as st
+import json
+import os
+import subprocess
+from datetime import datetime
+
+st.set_page_config(page_title="NSE Pre-Market Analyzer V2", layout="wide", initial_sidebar_state="expanded")
+
+# Hide Streamlit's default Deploy button, hamburger menu, and footer
+hide_streamlit_style = """
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+def load_data():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    preopen_path = os.path.join(base_dir, "v2_preopen_results.json")
+    overnight_path = os.path.join(base_dir, "v2_results.json")
+    
+    if os.path.exists(preopen_path):
+        with open(preopen_path, 'r', encoding='utf-8') as f:
+            return json.load(f), "Pre-Open Live Data"
+    elif os.path.exists(overnight_path):
+        with open(overnight_path, 'r', encoding='utf-8') as f:
+            return json.load(f), "Overnight Data"
+    return None, None
+
+def render_dashboard():
+    st.title("🚀 NSE V2.0 Quant Engine")
+    st.markdown("Hierarchical 4-Layer Gating System (Regime -> Context -> Trigger -> Execution)")
+    
+    data, source = load_data()
+    if not data:
+        st.error("No data found! Please run the V2 scanner first.")
+        return
+        
+    st.sidebar.header("Global Macros & Regime")
+    st.sidebar.markdown(f"**Data Source:** {source}")
+    
+    if st.sidebar.button("🟢 Fetch Live Pre-Open Data (Once)"):
+        with st.spinner("Fetching Live Pre-Open Data..."):
+            subprocess.run(["python", "preopen_v2.py"], shell=True)
+            st.rerun()
+            
+    st.sidebar.markdown("---")
+    auto_refresh = st.sidebar.toggle("⏱️ Auto-Refresh Pre-Open (15s)")
+    if auto_refresh:
+        import time
+        with st.spinner("Auto-fetching live pre-open data... Next refresh in 15s"):
+            subprocess.run(["python", "preopen_v2.py"], shell=True)
+        time.sleep(15)
+        st.rerun()
+        
+    if st.sidebar.button("🔄 Fetch Latest Overnight Data"):
+        with st.spinner("Running Overnight Scan in background..."):
+            subprocess.run(["python", "premarket_v2.py"], shell=True)
+            st.rerun()
+            
+    tab1, tab2 = st.tabs(["📋 Pre-Market Planner (9:00 - 9:15 AM)", "⚡ Live Action Alerts (9:20 AM+)"])
+    
+    with tab1:
+        fii_dii = data.get("fii_dii", {})
+        global_cues = data.get("global_cues", {})
+        results = data.get("results", [])
+        
+        # Render Market Regime in Sidebar
+        if results:
+            regime = results[0].get('v2_decision', {}).get('regime', {})
+            if regime:
+                st.sidebar.subheader("🌍 Master Market Regime")
+                st.sidebar.info(f"**{regime.get('regime')}**")
+                
+                vix = regime.get('india_vix', 0)
+                vix_col = "🔴" if vix > 20 else "🟢" if vix < 15 else "🟡"
+                st.sidebar.markdown(f"**VIX:** {vix_col} {vix}", help="India VIX (Volatility Index). < 15: Calm market, favorable for longs. 15-20: Normal volatility. > 20: High fear, expect wild swings (Risk-Off).")
+                
+                nft = regime.get('nifty_trend', 'NEUTRAL')
+                nifty_pct = global_cues.get('NIFTY_50', {}).get('pct_change', 0)
+                nft_col = "🟢" if nft == "BULLISH" else "🔴" if nft == "BEARISH" else "⚪"
+                st.sidebar.write(f"**Nifty:** {nft_col} {nft} ({nifty_pct}%)")
+                
+                st.sidebar.caption(regime.get('global_cues'))
+                
+        # Render FII/DII
+        if fii_dii:
+            st.sidebar.subheader("FII/DII Cash (Cr)")
+            fii = fii_dii.get('FII_Net', '0')
+            dii = fii_dii.get('DII_Net', '0')
+            fii_val = float(str(fii).replace(',', '')) if fii != 'N/A' else 0
+            dii_val = float(str(dii).replace(',', '')) if dii != 'N/A' else 0
+            
+            fii_col = "🟢" if fii_val > 0 else "🔴" if fii_val < 0 else "⚪"
+            dii_col = "🟢" if dii_val > 0 else "🔴" if dii_val < 0 else "⚪"
+            
+            st.sidebar.write(f"**FII:** {fii_col} {fii} Cr")
+            st.sidebar.write(f"**DII:** {dii_col} {dii} Cr")
+            
+        # Render Raw Global Cues
+        if global_cues:
+            st.sidebar.subheader("Raw Global Indices")
+            for key in ["S&P_500", "NASDAQ", "GOLD", "BRENT_CRUDE"]:
+                val = global_cues.get(key, {})
+                pct = val.get("pct_change", 0)
+                last = val.get("last_close", "N/A")
+                color = "🟢" if pct > 0 else "🔴" if pct < 0 else "⚪"
+                st.sidebar.write(f"{color} {key}: {last} ({pct}%)")
+                
+        # Render Market News
+        market_news = data.get("market_news", [])
+        if market_news:
+            st.sidebar.subheader("📰 Top Market News")
+            for idx, n in enumerate(market_news[:5]):
+                st.sidebar.markdown(f"**{idx+1}.** [{n['title']}]({n['link']})")
+            
+        for res in results:
+            symbol = res.get('symbol', 'UNKNOWN')
+            if 'error' in res:
+                st.error(f"{symbol}: {res['error']}")
+                continue
+                
+            v2 = res.get('v2_decision', {})
+            bias = v2.get('directional_bias', 'NEUTRAL')
+            setup = v2.get('setup_state', 'WAIT')
+            tradeability = v2.get('tradeability', 'OK')
+            
+            bias_col = "🟢 LONG" if bias == "LONG" else "🔴 SHORT" if bias == "SHORT" else "⚪ NEUTRAL"
+            setup_col = "🚀 READY" if setup == "READY" else f"⏳ {setup}"
+            trad_col = "🟢 OK" if tradeability == "OK" else "🔴 BLOCKED" if tradeability == "BLOCKED" else "🟡 CAUTION"
+            
+            with st.expander(f"{symbol} - Bias: {bias} | Setup: {setup}", expanded=True):
+                st.markdown(f"### {symbol}  |  Bias: {bias_col}  |  Tradeability: {trad_col}  |  Setup: {setup_col}")
+                
+                c1, c2, c3, c4 = st.columns(4)
+                
+                # --- Column 1: Catalyst & News ---
+                c1.markdown("#### 📰 Catalyst & News", help="Layer 1: Evaluates specific news events or catalysts that can impact this stock.")
+                llm = res.get('llm_analysis', {})
+                has_catalyst = False
+                if llm and isinstance(llm, dict) and llm.get('event') and llm.get('score', 0) > 0:
+                    has_catalyst = True
+                    c1.success(f"**SEBI Event:** {llm.get('event')}")
+                    c1.caption(f"Score: {llm.get('score')}/100 | Freshness: {llm.get('freshness')}")
+                else:
+                    c1.write("**NO MATERIAL CATALYST**")
+                    
+                sentiment = res.get('sentiment_data', {})
+                raw_news = sentiment.get('latest_news', [])
+                if raw_news:
+                    c1.markdown("---")
+                    c1.caption("Recent News Flow:")
+                    for idx, n in enumerate(raw_news[:2]):
+                        c1.markdown(f"{idx+1}. [{n['title']}]({n['link']})")
+                
+                # --- Column 2: Stock Context ---
+                context = v2.get('context', {})
+                c2.markdown("#### 📈 Stock Context", help="Layer 2: Evaluates the stock's trend, volatility (ATR), and relative strength vs its peers. A stock must be contextually positioned before a trigger is valid.")
+                c2.markdown(f"**Trend:** {context.get('trend_alignment')}")
+                c2.markdown(f"**Dist to 20EMA:** {context.get('distance_to_20ema'):.2f}%", help="Distance to 20-EMA. If > 5%, the stock is severely overextended and prone to mean-reversion.")
+                c2.markdown(f"**ATR:** {context.get('atr_percent'):.2f}%", help="Average True Range (Volatility). > 3% means the stock makes massive intraday swings. < 1.5% means the stock is very slow.")
+                c2.markdown(f"**Peer RS:** {context.get('peer_relative_strength'):.2f}", help="Relative Strength vs Sector Peers. > 0 means it is outperforming its competitors.")
+                
+                # --- Column 3: Pre-Open Trigger ---
+                trigger = v2.get('trigger', {})
+                c3.markdown("#### 🎯 Pre-Open Trigger", help="Layer 3: Evaluates the live Pre-Open Market (9:00 - 9:08 AM) for gap up/down normalized by ATR, Order Book Buy/Sell Imbalance, and F&O OI buildup.")
+                
+                gap_atr = trigger.get('gap_atr_ratio', 0)
+                imb = trigger.get('buy_sell_imbalance', 1)
+                gap_atr_str = f"{gap_atr:.2f}x" if isinstance(gap_atr, (int, float)) else str(gap_atr)
+                imb_str = f"{imb:.2f}x" if isinstance(imb, (int, float)) else str(imb)
+                
+                c3.markdown(f"**Gap/ATR:** {gap_atr_str}", help="Gap size divided by Average True Range. < 0.5x is a safe gap. > 1.0x indicates EXHAUSTION RISK (the stock has already moved its entire daily range in pre-market).")
+                c3.markdown(f"**Imbalance:** {imb_str}", help="Pre-Open Buy Qty vs Sell Qty. > 1.5x means heavy institutional buy pressure.")
+                
+                fno = trigger.get('fno_buildup', 'UNAVAILABLE')
+                ce = "🟢" if fno == "LONG_BUILDUP" else "🔴" if fno == "SHORT_BUILDUP" else "⚪"
+                c3.markdown(f"**F&O Buildup:** {ce} {fno}", help="Price + OI Matrix: LONG_BUILDUP (Smart Money Buying), SHORT_COVERING (Shorts Panicking - Weak Rally), SHORT_BUILDUP (Smart Money Selling), LONG_UNWINDING (Longs giving up).")
+                
+                # --- Column 4: Execution Filter ---
+                exec_f = v2.get('execution', {})
+                c4.markdown("#### 🛡️ Execution Filter", help="Layer 4: Final hard gates. Blocks trades with insufficient liquidity or dangerous Reward/Risk profiles.")
+                c4.markdown(f"**Condition:** {v2.get('entry_condition')}")
+                c4.markdown(f"**Invalidation:** {v2.get('invalidation')}")
+                if exec_f.get('block_reasons'):
+                    for b in exec_f.get('block_reasons'):
+                        c4.error(b)
+                        
+                # Direct Participation Strategy UI
+                if exec_f.get('direct_participation_safe'):
+                    c4.markdown("---")
+                    c4.success("🔥 **DIRECT PARTICIPATION SAFE**")
+                    c4.markdown(f"**Max Safe Limit:** Rs. {exec_f.get('max_safe_limit_price')}")
+                    c4.caption("LIMIT ORDERS ONLY. Massive Catalyst & High Liquidity detected.")
+                else:
+                    c4.markdown("---")
+                    c4.info("🚫 **Direct Pre-Market Unsafe** (Wait for 9:15 AM)")
+
+    with tab2:
+        st.markdown("### ⚡ Live VWAP/ORB Scanner")
+        st.caption("Scans live 5-minute intraday candles to confirm institutional participation and direction.")
+        
+        if st.button("🟢 Run Live Scan"):
+                orb_col = "🟢 Breakout" if res.get('orb_bullish') else "🔴 Breakdown" if res.get('orb_bearish') else "🟡 Inside Range"
+                
+                rsi = res.get('rsi', 50)
+                rsi_col = "🔴 Overbought" if rsi > 70 else "🟢 Oversold" if rsi < 30 else "🟡 Healthy"
+                
+                vol = res.get('rel_vol', 1.0)
+                vol_col = "🟢" if vol > 1.2 else "🔴" if vol < 0.8 else "⚪"
+                
+                st.markdown(f"**{sym} — {bias} BIAS**")
+                st.markdown(f'''
+* **VWAP:** {vwap_col}
+* **ORB:** {orb_col}
+* **RSI:** {rsi_col} ({rsi:.1f})
+* **Relative Volume:** {vol_col} {vol:.1f}x
+* **Market Regime:** {res.get('regime')}
+* **Invalidation:** {res.get('invalidation')}
+* **Target Zone:** Rs. {res.get('target_zone')}
+                ''')
+        else:
+            st.info("Click the button above to run the live VWAP scan.")
+
+if __name__ == '__main__':
+    render_dashboard()

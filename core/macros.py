@@ -38,8 +38,15 @@ def fetch_global_cues():
     symbols = {
         "S&P_500": "^GSPC",
         "NASDAQ": "^IXIC",
+        "DOW_JONES": "^DJI",
         "BRENT_CRUDE": "BZ=F",
-        "USD_INR": "INR=X"
+        "GOLD": "GC=F",
+        "USD_INR": "INR=X",
+        "DXY": "DX-Y.NYB",
+        "US_10Y": "^TNX",
+        "NIKKEI_225": "^N225",
+        "HANG_SENG": "^HSI",
+        "SHANGHAI": "000001.SS"
     }
     
     # Fallbacks in case jugaad_data failed
